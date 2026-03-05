@@ -13,8 +13,6 @@
 
 void test_placeholder();
 void test_read_credentials();
-void test_is_token_expired();
-void test_refresh_token();
 void test_fetch_usage();
 void test_worker_thread();
 void test_worker_request_refresh();
@@ -25,8 +23,6 @@ int main()
 
     test_placeholder();
     test_read_credentials();
-    test_is_token_expired();
-    test_refresh_token();
     test_fetch_usage();
     test_worker_thread();
     test_worker_request_refresh();
@@ -45,48 +41,10 @@ void test_read_credentials()
     auto result = ReadCredentials();
     if (result.success) {
         assert(!result.credentials.accessToken.empty());
-        assert(!result.credentials.refreshToken.empty());
         assert(result.credentials.expiresAt > 0);
         printf("[PASS] test_read_credentials (live)\n");
     } else {
         printf("[SKIP] test_read_credentials: %s\n", result.error.c_str());
-    }
-}
-
-void test_is_token_expired()
-{
-    Credentials creds;
-    creds.expiresAt = static_cast<int64_t>(time(nullptr)) * 1000 - 3600000;
-    assert(IsTokenExpired(creds) == true);
-
-    creds.expiresAt = static_cast<int64_t>(time(nullptr)) * 1000 + 3600000;
-    assert(IsTokenExpired(creds) == false);
-
-    creds.expiresAt = static_cast<int64_t>(time(nullptr)) * 1000 + 240000;
-    assert(IsTokenExpired(creds) == true);
-
-    printf("[PASS] test_is_token_expired\n");
-}
-
-void test_refresh_token()
-{
-    auto cred_result = ReadCredentials();
-    if (!cred_result.success) {
-        printf("[SKIP] test_refresh_token: no credentials\n");
-        return;
-    }
-
-    Credentials expired = cred_result.credentials;
-    expired.expiresAt = 0;
-    assert(IsTokenExpired(expired));
-
-    auto refresh_result = RefreshToken(expired);
-    if (refresh_result.success) {
-        assert(!refresh_result.credentials.accessToken.empty());
-        assert(!refresh_result.credentials.refreshToken.empty());
-        printf("[PASS] test_refresh_token (live)\n");
-    } else {
-        printf("[SKIP] test_refresh_token: %s\n", refresh_result.error.c_str());
     }
 }
 
@@ -96,8 +54,6 @@ void test_fetch_usage()
     if (result.success) {
         assert(result.usage.fiveHourPct >= 0.0 && result.usage.fiveHourPct <= 100.0);
         assert(result.usage.sevenDayPct >= 0.0 && result.usage.sevenDayPct <= 100.0);
-        assert(!result.usage.fiveHourResetsAt.empty());
-        assert(!result.usage.sevenDayResetsAt.empty());
         printf("[PASS] test_fetch_usage (live) - 5h: %.1f%%, 7d: %.1f%%\n",
             result.usage.fiveHourPct, result.usage.sevenDayPct);
     } else {

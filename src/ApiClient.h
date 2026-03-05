@@ -5,7 +5,6 @@
 
 struct Credentials {
     std::string accessToken;
-    std::string refreshToken;
     int64_t expiresAt = 0;
 };
 
@@ -24,7 +23,5 @@ struct ApiResponse {
 };
 
 ApiResponse ReadCredentials();
-bool IsTokenExpired(const Credentials& creds);
-ApiResponse RefreshToken(const Credentials& creds);
 ApiResponse FetchUsage(const Credentials& creds);
 ApiResponse FetchUsageWithAutoRefresh();

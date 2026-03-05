@@ -13,8 +13,6 @@
 
 using json = nlohmann::json;
 
-static const int64_t kTokenExpiryBufferMs = 5 * 60 * 1000;
-
 static std::wstring GetCredentialsPath()
 {
     return Settings::Instance().GetEffectiveCredentialsPath();
@@ -44,7 +42,6 @@ ApiResponse ReadCredentials()
         auto j = json::parse(content);
         auto& oauth = j.at("claudeAiOauth");
         resp.credentials.accessToken = oauth.at("accessToken").get<std::string>();
-        resp.credentials.refreshToken = oauth.at("refreshToken").get<std::string>();
         resp.credentials.expiresAt = oauth.at("expiresAt").get<int64_t>();
         resp.success = true;
     } catch (const json::exception& e) {
@@ -54,15 +51,6 @@ ApiResponse ReadCredentials()
     return resp;
 }
 
-bool IsTokenExpired(const Credentials& creds)
-{
-    auto nowMs = static_cast<int64_t>(time(nullptr)) * 1000;
-    return creds.expiresAt <= (nowMs + kTokenExpiryBufferMs);
-}
-
-static const wchar_t* kRefreshHost = L"platform.claude.com";
-static const wchar_t* kRefreshPath = L"/v1/oauth/token";
-static const char* kClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 static const DWORD kTimeoutMs = 10000;
 
 struct HttpResponse {
@@ -145,63 +133,6 @@ static HttpResponse HttpRequest(
     return resp;
 }
 
-static bool WriteCredentialsFile(const Credentials& creds)
-{
-    auto path = GetCredentialsPath();
-    auto content = ReadFileUtf8(path);
-    if (content.empty()) return false;
-
-    try {
-        auto j = json::parse(content);
-        j["claudeAiOauth"]["accessToken"] = creds.accessToken;
-        j["claudeAiOauth"]["refreshToken"] = creds.refreshToken;
-        j["claudeAiOauth"]["expiresAt"] = creds.expiresAt;
-
-        std::ofstream file(path, std::ios::binary | std::ios::trunc);
-        if (!file.is_open()) return false;
-        file << j.dump();
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-ApiResponse RefreshToken(const Credentials& creds)
-{
-    ApiResponse resp;
-
-    json body;
-    body["grant_type"] = "refresh_token";
-    body["refresh_token"] = creds.refreshToken;
-    body["client_id"] = kClientId;
-    body["scope"] = "user:profile user:inference user:sessions:claude_code user:mcp_servers";
-
-    auto http = HttpRequest(kRefreshHost, kRefreshPath, L"POST",
-        L"Content-Type: application/json", body.dump());
-
-    if (!http.success) {
-        resp.error = "Token refresh failed: " + (http.error.empty()
-            ? ("HTTP " + std::to_string(http.statusCode))
-            : http.error);
-        return resp;
-    }
-
-    try {
-        auto j = json::parse(http.body);
-        resp.credentials.accessToken = j.at("access_token").get<std::string>();
-        resp.credentials.refreshToken = j.value("refresh_token", creds.refreshToken);
-        auto expiresIn = j.at("expires_in").get<int64_t>();
-        resp.credentials.expiresAt = static_cast<int64_t>(time(nullptr)) * 1000 + expiresIn * 1000;
-        resp.success = true;
-
-        WriteCredentialsFile(resp.credentials);
-    } catch (const json::exception& e) {
-        resp.error = std::string("Refresh response parse error: ") + e.what();
-    }
-
-    return resp;
-}
-
 static const wchar_t* kUsageHost = L"api.anthropic.com";
 static const wchar_t* kUsagePath = L"/api/oauth/usage";
 
@@ -258,20 +189,10 @@ ApiResponse FetchUsageWithAutoRefresh()
     auto credResult = ReadCredentials();
     if (!credResult.success) return credResult;
 
-    auto creds = credResult.credentials;
-
-    if (IsTokenExpired(creds)) {
-        auto refreshResult = RefreshToken(creds);
-        if (!refreshResult.success) return refreshResult;
-        creds = refreshResult.credentials;
-    }
-
-    auto usageResult = FetchUsage(creds);
+    auto usageResult = FetchUsage(credResult.credentials);
 
     if (!usageResult.success && usageResult.error.find("HTTP 401") != std::string::npos) {
-        auto refreshResult = RefreshToken(creds);
-        if (!refreshResult.success) return refreshResult;
-        usageResult = FetchUsage(refreshResult.credentials);
+        usageResult.error = "Token expired — open Claude Code to refresh login";
     }
 
     return usageResult;
