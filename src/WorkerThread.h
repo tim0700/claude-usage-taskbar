@@ -28,6 +28,7 @@ public:
 
 private:
     void Run();
+    FILETIME GetCredentialsFileTime();
 
     std::thread m_thread;
     std::mutex m_mutex;
@@ -35,4 +36,6 @@ private:
     std::atomic<bool> m_shutdown{false};
     std::atomic<bool> m_refreshRequested{false};
     UsageData m_data;
+    bool m_inBackoff{false};
+    FILETIME m_lastCredentialsTime{};
 };

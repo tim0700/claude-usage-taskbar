@@ -148,6 +148,7 @@ ApiResponse FetchUsage(const Credentials& creds)
     auto http = HttpRequest(kUsageHost, kUsagePath, L"GET", headers.c_str(), {});
 
     if (!http.success) {
+        resp.rateLimited = (http.statusCode == 429);
         resp.error = "Usage fetch failed: " + (http.error.empty()
             ? ("HTTP " + std::to_string(http.statusCode))
             : http.error);

@@ -7,7 +7,7 @@
 struct PluginSettings {
     std::wstring credentialsPath;
     int itemWidth = 160;
-    int pollInterval = 60;
+    int pollInterval = 300;
 };
 
 class Settings {

@@ -17,6 +17,7 @@ struct UsageResult {
 
 struct ApiResponse {
     bool success = false;
+    bool rateLimited = false;
     std::string error;
     Credentials credentials;
     UsageResult usage;

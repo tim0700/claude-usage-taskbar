@@ -6,6 +6,7 @@
 #include <ctime>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 
 static std::wstring FormatResetsIn(const std::string& isoTimestamp)
 {
@@ -76,38 +77,89 @@ UsageData WorkerThread::GetSnapshot()
     return m_data;
 }
 
+static const int kBackoffSeconds = 600;
+
+FILETIME WorkerThread::GetCredentialsFileTime()
+{
+    FILETIME ft{};
+    auto path = Settings::Instance().GetEffectiveCredentialsPath();
+    HANDLE hFile = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        GetFileTime(hFile, nullptr, nullptr, &ft);
+        CloseHandle(hFile);
+    }
+    return ft;
+}
+
+bool CredentialsFileChanged(const FILETIME& a, const FILETIME& b)
+{
+    return CompareFileTime(&a, &b) != 0;
+}
+
 void WorkerThread::Run()
 {
+    m_lastCredentialsTime = GetCredentialsFileTime();
+
     while (!m_shutdown) {
-        m_refreshRequested = false;
-        auto result = FetchUsageWithAutoRefresh();
+        bool skipFetch = false;
 
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            if (result.success) {
-                m_data.five_hour_pct = result.usage.fiveHourPct;
-                m_data.seven_day_pct = result.usage.sevenDayPct;
-                m_data.five_hour_resets = FormatResetsIn(result.usage.fiveHourResetsAt);
-                m_data.seven_day_resets = FormatResetsIn(result.usage.sevenDayResetsAt);
-                m_data.last_success_tick = GetTickCount64();
-
-                if (!result.error.empty()) {
-                    m_data.has_error = true;
-                    m_data.error_msg = Utf8ToWide(result.error);
-                } else {
-                    m_data.has_error = false;
-                    m_data.error_msg.clear();
-                }
+        if (m_inBackoff && m_refreshRequested) {
+            auto currentTime = GetCredentialsFileTime();
+            if (CredentialsFileChanged(m_lastCredentialsTime, currentTime)) {
+                m_lastCredentialsTime = currentTime;
+                m_inBackoff = false;
             } else {
-                m_data.has_error = true;
-                m_data.error_msg = Utf8ToWide(result.error);
+                skipFetch = true;
             }
         }
 
-        std::unique_lock<std::mutex> lock(m_mutex);
-        auto interval = std::chrono::seconds(Settings::Instance().Get().pollInterval);
-        m_cv.wait_for(lock, interval, [this] {
-            return m_shutdown.load() || m_refreshRequested.load();
-        });
+        m_refreshRequested = false;
+
+        if (!skipFetch) {
+            auto result = FetchUsageWithAutoRefresh();
+
+            int waitSeconds = Settings::Instance().Get().pollInterval;
+
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                if (result.success) {
+                    m_data.five_hour_pct = result.usage.fiveHourPct;
+                    m_data.seven_day_pct = result.usage.sevenDayPct;
+                    m_data.five_hour_resets = FormatResetsIn(result.usage.fiveHourResetsAt);
+                    m_data.seven_day_resets = FormatResetsIn(result.usage.sevenDayResetsAt);
+                    m_data.last_success_tick = GetTickCount64();
+                    m_inBackoff = false;
+
+                    if (!result.error.empty()) {
+                        m_data.has_error = true;
+                        m_data.error_msg = Utf8ToWide(result.error);
+                    } else {
+                        m_data.has_error = false;
+                        m_data.error_msg.clear();
+                    }
+                } else {
+                    m_data.has_error = true;
+                    if (result.rateLimited) {
+                        m_inBackoff = true;
+                        waitSeconds = kBackoffSeconds;
+                        m_lastCredentialsTime = GetCredentialsFileTime();
+                        m_data.error_msg = L"Rate limited — backing off 10min";
+                    } else {
+                        m_data.error_msg = Utf8ToWide(result.error);
+                    }
+                }
+            }
+
+            std::unique_lock<std::mutex> lock(m_mutex);
+            m_cv.wait_for(lock, std::chrono::seconds(waitSeconds), [this] {
+                return m_shutdown.load() || m_refreshRequested.load();
+            });
+        } else {
+            std::unique_lock<std::mutex> lock(m_mutex);
+            m_cv.wait_for(lock, std::chrono::seconds(kBackoffSeconds), [this] {
+                return m_shutdown.load() || m_refreshRequested.load();
+            });
+        }
     }
 }
