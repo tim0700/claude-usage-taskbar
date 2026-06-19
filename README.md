@@ -1,5 +1,10 @@
 # claude-usage-taskbar
 
+> [!IMPORTANT]
+> This project is archived and no longer maintained. Claude now provides official usage visibility in [Settings > Usage](https://claude.ai/settings/usage), including five-hour session and weekly usage progress for supported plans.
+>
+> Version 1.0.2 is the final public release. The unofficial usage API used by this plugin is blocked or unreliable for OAuth credentials, so new installs are not recommended.
+
 A [TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor) plugin that displays your Claude AI usage (5-hour session and 7-day weekly) directly in the Windows taskbar.
 
 | Taskbar | Hover |
