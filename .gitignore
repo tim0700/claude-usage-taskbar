@@ -1,0 +1,16 @@
+build/
+dist/
+.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
+*.ipch
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+*.log

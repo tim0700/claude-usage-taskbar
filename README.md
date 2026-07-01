@@ -58,12 +58,16 @@ Settings are stored in `claude-usage-taskbar.ini` next to the DLL.
 
 Requirements: Visual Studio 2022 Build Tools (MSVC v143), C++17
 
+This repository can be edited from WSL, but builds are Windows-native. From WSL, call the Windows MSBuild executable directly:
+
 ```bash
+MSBUILDFULL='/mnt/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/MSBuild.exe'
+
 # x64
-MSBuild claude-usage-taskbar.vcxproj -p:Configuration=Release -p:Platform=x64
+"$MSBUILDFULL" claude-usage-taskbar.vcxproj -p:Configuration=Release -p:Platform=x64 -nologo -v:minimal
 
 # x86
-MSBuild claude-usage-taskbar.vcxproj -p:Configuration=Release -p:Platform=Win32
+"$MSBUILDFULL" claude-usage-taskbar.vcxproj -p:Configuration=Release -p:Platform=Win32 -nologo -v:minimal
 ```
 
 Output: `build/Release-x64/` or `build/Release-x86/`
