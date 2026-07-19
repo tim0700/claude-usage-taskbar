@@ -155,20 +155,26 @@ ApiResponse ParseUsageResponse(const std::string& body)
 
         auto safeDouble = [](const json& v) { return v.is_number() ? v.get<double>() : 0.0; };
         auto safeString = [](const json& v) { return v.is_string() ? v.get<std::string>() : std::string{}; };
+        // Percentages are server-controlled; clamp so extreme values cannot
+        // overflow fixed-size format buffers or draw outside the bar track
+        auto safePct = [&safeDouble](const json& v) {
+            double d = safeDouble(v);
+            return d < 0.0 ? 0.0 : (d > 100.0 ? 100.0 : d);
+        };
 
         bool haveFive = false;
         bool haveSeven = false;
 
         if (j.contains("five_hour") && j["five_hour"].is_object()) {
             auto& fh = j["five_hour"];
-            resp.usage.fiveHourPct = safeDouble(fh.value("utilization", json()));
+            resp.usage.fiveHourPct = safePct(fh.value("utilization", json()));
             resp.usage.fiveHourResetsAt = safeString(fh.value("resets_at", json()));
             haveFive = true;
         }
 
         if (j.contains("seven_day") && j["seven_day"].is_object()) {
             auto& sd = j["seven_day"];
-            resp.usage.sevenDayPct = safeDouble(sd.value("utilization", json()));
+            resp.usage.sevenDayPct = safePct(sd.value("utilization", json()));
             resp.usage.sevenDayResetsAt = safeString(sd.value("resets_at", json()));
             haveSeven = true;
         }
@@ -180,7 +186,7 @@ ApiResponse ParseUsageResponse(const std::string& body)
             for (const auto& lim : j["limits"]) {
                 if (!lim.is_object()) continue;
                 auto kind = safeString(lim.value("kind", json()));
-                double pct = safeDouble(lim.value("percent", json()));
+                double pct = safePct(lim.value("percent", json()));
                 auto resets = safeString(lim.value("resets_at", json()));
 
                 if (kind == "session" && !haveFive) {
@@ -203,7 +209,11 @@ ApiResponse ParseUsageResponse(const std::string& body)
                             if (scope.contains("model") && scope["model"].is_object())
                                 label = safeString(scope["model"].value("display_name", json()));
                         }
-                        resp.usage.scopedWeeklyLabel = label.empty() ? std::string("Model") : label;
+                        if (label.empty())
+                            label = "Model";
+                        else if (label.size() > 32)
+                            label.resize(32);  // server-controlled; feeds fixed-size format buffers
+                        resp.usage.scopedWeeklyLabel = label;
                     }
                 }
             }

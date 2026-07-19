@@ -113,6 +113,23 @@ void test_parse_usage_response()
     assert(!r.success);
     assert(!r.error.empty());
 
+    // Hostile values: out-of-range percentages clamp to [0,100] and an
+    // oversized model name is truncated (both feed fixed-size buffers)
+    std::string hostile = R"({
+        "five_hour": {"utilization": 1e308, "resets_at": ""},
+        "seven_day": {"utilization": -42.0, "resets_at": ""},
+        "limits": [
+            {"kind": "weekly_scoped", "group": "weekly", "percent": 9999, "resets_at": "",
+             "scope": {"model": {"id": null, "display_name": ")" + std::string(500, 'A') + R"("}, "surface": null}}
+        ]
+    })";
+    r = ParseUsageResponse(hostile);
+    assert(r.success);
+    assert(r.usage.fiveHourPct == 100.0);
+    assert(r.usage.sevenDayPct == 0.0);
+    assert(r.usage.scopedWeeklyPct == 100.0);
+    assert(r.usage.scopedWeeklyLabel.size() <= 32);
+
     printf("[PASS] test_parse_usage_response\n");
 }
 

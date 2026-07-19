@@ -101,7 +101,8 @@ void ClaudeUsagePlugin::DataRequired()
             m_pApp->ShowNotifyMessage(L"Claude Usage: Credentials not found. Install Claude Code and run 'claude login'.");
             m_notifiedNoCredentials = true;
         }
-        if (msg.find(L"401") != std::wstring::npos && !m_notifiedAuthFailed) {
+        if ((msg.find(L"401") != std::wstring::npos
+                || msg.find(L"Token expired") != std::wstring::npos) && !m_notifiedAuthFailed) {
             m_pApp->ShowNotifyMessage(L"Claude Usage: Authentication failed. Run 'claude login' to re-authenticate.");
             m_notifiedAuthFailed = true;
         }
