@@ -14,9 +14,14 @@ struct UsageData {
     double seven_day_pct = 0.0;
     std::wstring five_hour_resets;
     std::wstring seven_day_resets;
+    bool has_scoped = false;
+    double scoped_pct = 0.0;
+    std::wstring scoped_resets;
+    std::wstring scoped_label;
     bool has_error = false;
     std::wstring error_msg;
     ULONGLONG last_success_tick = 0;
+    ULONGLONG backoff_until_tick = 0;
 };
 
 class WorkerThread {

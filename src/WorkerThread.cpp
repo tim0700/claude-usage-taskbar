@@ -128,7 +128,12 @@ void WorkerThread::Run()
                     m_data.seven_day_pct = result.usage.sevenDayPct;
                     m_data.five_hour_resets = FormatResetsIn(result.usage.fiveHourResetsAt);
                     m_data.seven_day_resets = FormatResetsIn(result.usage.sevenDayResetsAt);
+                    m_data.has_scoped = result.usage.hasScopedWeekly;
+                    m_data.scoped_pct = result.usage.scopedWeeklyPct;
+                    m_data.scoped_resets = FormatResetsIn(result.usage.scopedWeeklyResetsAt);
+                    m_data.scoped_label = Utf8ToWide(result.usage.scopedWeeklyLabel);
                     m_data.last_success_tick = GetTickCount64();
+                    m_data.backoff_until_tick = 0;
                     m_inBackoff = false;
 
                     if (!result.error.empty()) {
@@ -142,9 +147,18 @@ void WorkerThread::Run()
                     m_data.has_error = true;
                     if (result.rateLimited) {
                         m_inBackoff = true;
-                        waitSeconds = kBackoffSeconds;
+                        int backoff = kBackoffSeconds;
+                        // Honor the server's Retry-After when present, within sane bounds
+                        if (result.retryAfterSec > 0) {
+                            backoff = result.retryAfterSec;
+                            if (backoff < 60) backoff = 60;
+                            if (backoff > 3600) backoff = 3600;
+                        }
+                        waitSeconds = backoff;
                         m_lastCredentialsTime = GetCredentialsFileTime();
-                        m_data.error_msg = L"Rate limited — backing off 10min";
+                        m_data.error_msg = L"Rate limited";
+                        m_data.backoff_until_tick = GetTickCount64()
+                            + static_cast<ULONGLONG>(backoff) * 1000;
                     } else {
                         m_data.error_msg = Utf8ToWide(result.error);
                     }
@@ -156,8 +170,14 @@ void WorkerThread::Run()
                 return m_shutdown.load() || m_refreshRequested.load();
             });
         } else {
+            // Refresh request arrived mid-backoff: keep waiting only until the
+            // original deadline instead of re-arming a fresh backoff window
             std::unique_lock<std::mutex> lock(m_mutex);
-            m_cv.wait_for(lock, std::chrono::seconds(kBackoffSeconds), [this] {
+            ULONGLONG now = GetTickCount64();
+            int remainSec = 1;
+            if (m_data.backoff_until_tick > now)
+                remainSec = static_cast<int>((m_data.backoff_until_tick - now) / 1000) + 1;
+            m_cv.wait_for(lock, std::chrono::seconds(remainSec), [this] {
                 return m_shutdown.load() || m_refreshRequested.load();
             });
         }

@@ -11,11 +11,22 @@ static COLORREF LerpColor(COLORREF a, COLORREF b, double t)
         GetBValue(a) + static_cast<int>((GetBValue(b) - GetBValue(a)) * t));
 }
 
-static COLORREF BarColorForPct(double pct)
+static COLORREF BarColorFor(double pct, COLORREF base)
 {
-    if (pct <= 60.0) return kBarBlue;
-    if (pct <= 80.0) return LerpColor(kBarBlue, kBarOrange, (pct - 60.0) / 20.0);
+    if (pct <= 60.0) return base;
+    if (pct <= 80.0) return LerpColor(base, kBarOrange, (pct - 60.0) / 20.0);
     return LerpColor(kBarOrange, kBarRed, (pct - 80.0) / 20.0);
+}
+
+static void FillBar(HDC hdc, int x, int y, int w, int h, double pct, COLORREF base)
+{
+    if (pct <= 0.0) return;
+    int fillW = static_cast<int>(w * pct / 100.0);
+    if (fillW < 1) fillW = 1;
+    RECT fillRect = {x, y, x + fillW, y + h};
+    HBRUSH fillBrush = CreateSolidBrush(BarColorFor(pct, base));
+    FillRect(hdc, &fillRect, fillBrush);
+    DeleteObject(fillBrush);
 }
 
 void RenderUsageItem(
@@ -24,8 +35,11 @@ void RenderUsageItem(
     const wchar_t* label,
     double pct,
     bool has_data,
-    bool refreshing)
+    bool refreshing,
+    bool has_second,
+    double pct2)
 {
+    double displayPct = (has_second && pct2 > pct) ? pct2 : pct;
     RECT itemRect = {x, y, x + w, y + h};
     ExtTextOut(hdc, 0, 0, ETO_OPAQUE, &itemRect, nullptr, 0, nullptr);
 
@@ -45,7 +59,7 @@ void RenderUsageItem(
     if (refreshing)
         swprintf_s(pctText, L"...");
     else if (has_data)
-        swprintf_s(pctText, L"%.0f%%", pct);
+        swprintf_s(pctText, L"%.0f%%", displayPct);
     else
         swprintf_s(pctText, L"--");
 
@@ -64,28 +78,43 @@ void RenderUsageItem(
 
     if (barW < 10) barW = 10;
 
-    int barH = h * 30 / 100;
-    if (barH < 3) barH = 3;
-    int barY = y + (h - barH) / 2;
-
     if (hasLabel) {
         SetTextColor(hdc, labelColor);
         RECT labelRect = {x, y, x + labelSize.cx, y + h};
         DrawTextW(hdc, label, -1, &labelRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
     }
 
-    RECT trackRect = {barX, barY, barX + barW, barY + barH};
     HBRUSH trackBrush = CreateSolidBrush(trackColor);
-    FillRect(hdc, &trackRect, trackBrush);
-    DeleteObject(trackBrush);
 
-    if (has_data && pct > 0.0) {
-        int fillW = static_cast<int>(barW * pct / 100.0);
-        if (fillW < 1 && pct > 0.0) fillW = 1;
-        RECT fillRect = {barX, barY, barX + fillW, barY + barH};
-        HBRUSH fillBrush = CreateSolidBrush(BarColorForPct(pct));
-        FillRect(hdc, &fillRect, fillBrush);
-        DeleteObject(fillBrush);
+    if (has_second) {
+        int subH = h * kDualBarPctH / 100;
+        if (subH < 2) subH = 2;
+        int gap = kDualBarGapPx;
+        int totalH = subH * 2 + gap;
+        int topY = y + (h - totalH) / 2;
+        int botY = topY + subH + gap;
+
+        RECT topTrack = {barX, topY, barX + barW, topY + subH};
+        RECT botTrack = {barX, botY, barX + barW, botY + subH};
+        FillRect(hdc, &topTrack, trackBrush);
+        FillRect(hdc, &botTrack, trackBrush);
+        DeleteObject(trackBrush);
+
+        if (has_data) {
+            FillBar(hdc, barX, topY, barW, subH, pct, kBarBlue);
+            FillBar(hdc, barX, botY, barW, subH, pct2, kBarPurple);
+        }
+    } else {
+        int barH = h * kSingleBarPctH / 100;
+        if (barH < 3) barH = 3;
+        int barY = y + (h - barH) / 2;
+
+        RECT trackRect = {barX, barY, barX + barW, barY + barH};
+        FillRect(hdc, &trackRect, trackBrush);
+        DeleteObject(trackBrush);
+
+        if (has_data)
+            FillBar(hdc, barX, barY, barW, barH, pct, kBarBlue);
     }
 
     SetTextColor(hdc, pctColor);

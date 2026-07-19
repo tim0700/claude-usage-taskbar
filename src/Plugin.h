@@ -21,7 +21,8 @@ public:
     int OnMouseEvent(MouseEventType type, int x, int y, void* hWnd, int flag) override;
 
     void SetOwner(ClaudeUsagePlugin* owner) { m_owner = owner; }
-    void UpdateData(double pct, bool has_data, bool refreshing);
+    void UpdateData(double pct, bool has_data, bool refreshing,
+        bool has_second = false, double pct2 = 0.0);
 
 private:
     const wchar_t* m_name;
@@ -31,6 +32,8 @@ private:
     double m_pct = 0.0;
     bool m_hasData = false;
     bool m_refreshing = false;
+    bool m_hasSecond = false;
+    double m_pct2 = 0.0;
 };
 
 class ClaudeUsagePlugin : public ITMPlugin

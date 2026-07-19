@@ -56,6 +56,7 @@ static const DWORD kTimeoutMs = 10000;
 struct HttpResponse {
     bool success = false;
     int statusCode = 0;
+    int retryAfterSec = 0;
     std::string body;
     std::string error;
 };
@@ -116,6 +117,15 @@ static HttpResponse HttpRequest(
         nullptr, &statusCode, &size, nullptr);
     resp.statusCode = static_cast<int>(statusCode);
 
+    if (statusCode == 429) {
+        wchar_t retryBuf[32] = {};
+        DWORD retrySize = sizeof(retryBuf);
+        if (WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_RETRY_AFTER,
+                WINHTTP_HEADER_NAME_BY_INDEX, retryBuf, &retrySize, WINHTTP_NO_HEADER_INDEX)) {
+            resp.retryAfterSec = _wtoi(retryBuf);  // 0 if the header is an HTTP-date
+        }
+    }
+
     std::string responseBody;
     DWORD bytesAvailable = 0;
     while (WinHttpQueryDataAvailable(hRequest, &bytesAvailable) && bytesAvailable > 0) {
@@ -136,6 +146,81 @@ static HttpResponse HttpRequest(
 static const wchar_t* kUsageHost = L"api.anthropic.com";
 static const wchar_t* kUsagePath = L"/api/oauth/usage";
 
+ApiResponse ParseUsageResponse(const std::string& body)
+{
+    ApiResponse resp;
+
+    try {
+        auto j = json::parse(body);
+
+        auto safeDouble = [](const json& v) { return v.is_number() ? v.get<double>() : 0.0; };
+        auto safeString = [](const json& v) { return v.is_string() ? v.get<std::string>() : std::string{}; };
+
+        bool haveFive = false;
+        bool haveSeven = false;
+
+        if (j.contains("five_hour") && j["five_hour"].is_object()) {
+            auto& fh = j["five_hour"];
+            resp.usage.fiveHourPct = safeDouble(fh.value("utilization", json()));
+            resp.usage.fiveHourResetsAt = safeString(fh.value("resets_at", json()));
+            haveFive = true;
+        }
+
+        if (j.contains("seven_day") && j["seven_day"].is_object()) {
+            auto& sd = j["seven_day"];
+            resp.usage.sevenDayPct = safeDouble(sd.value("utilization", json()));
+            resp.usage.sevenDayResetsAt = safeString(sd.value("resets_at", json()));
+            haveSeven = true;
+        }
+
+        // Newer responses carry a "limits" array; model-scoped weekly limits
+        // (e.g. Fable) only exist there. Legacy top-level fields stay primary
+        // for session/weekly so utilization keeps its decimals.
+        if (j.contains("limits") && j["limits"].is_array()) {
+            for (const auto& lim : j["limits"]) {
+                if (!lim.is_object()) continue;
+                auto kind = safeString(lim.value("kind", json()));
+                double pct = safeDouble(lim.value("percent", json()));
+                auto resets = safeString(lim.value("resets_at", json()));
+
+                if (kind == "session" && !haveFive) {
+                    resp.usage.fiveHourPct = pct;
+                    resp.usage.fiveHourResetsAt = resets;
+                    haveFive = true;
+                } else if (kind == "weekly_all" && !haveSeven) {
+                    resp.usage.sevenDayPct = pct;
+                    resp.usage.sevenDayResetsAt = resets;
+                    haveSeven = true;
+                } else if (kind == "weekly_scoped") {
+                    // Multiple scoped limits: keep the most utilized one
+                    if (!resp.usage.hasScopedWeekly || pct > resp.usage.scopedWeeklyPct) {
+                        resp.usage.hasScopedWeekly = true;
+                        resp.usage.scopedWeeklyPct = pct;
+                        resp.usage.scopedWeeklyResetsAt = resets;
+                        std::string label;
+                        if (lim.contains("scope") && lim["scope"].is_object()) {
+                            const auto& scope = lim["scope"];
+                            if (scope.contains("model") && scope["model"].is_object())
+                                label = safeString(scope["model"].value("display_name", json()));
+                        }
+                        resp.usage.scopedWeeklyLabel = label.empty() ? std::string("Model") : label;
+                    }
+                }
+            }
+        }
+
+        resp.success = true;
+
+        if (!haveFive || !haveSeven) {
+            resp.error = "Partial data: some usage fields missing (unsupported plan?)";
+        }
+    } catch (const json::exception& e) {
+        resp.error = std::string("Usage response parse error: ") + e.what();
+    }
+
+    return resp;
+}
+
 ApiResponse FetchUsage(const Credentials& creds)
 {
     ApiResponse resp;
@@ -149,40 +234,14 @@ ApiResponse FetchUsage(const Credentials& creds)
 
     if (!http.success) {
         resp.rateLimited = (http.statusCode == 429);
+        resp.retryAfterSec = http.retryAfterSec;
         resp.error = "Usage fetch failed: " + (http.error.empty()
             ? ("HTTP " + std::to_string(http.statusCode))
             : http.error);
         return resp;
     }
 
-    try {
-        auto j = json::parse(http.body);
-
-        auto safeDouble = [](const json& v) { return v.is_number() ? v.get<double>() : 0.0; };
-        auto safeString = [](const json& v) { return v.is_string() ? v.get<std::string>() : std::string{}; };
-
-        if (j.contains("five_hour") && j["five_hour"].is_object()) {
-            auto& fh = j["five_hour"];
-            resp.usage.fiveHourPct = safeDouble(fh.value("utilization", json()));
-            resp.usage.fiveHourResetsAt = safeString(fh.value("resets_at", json()));
-        }
-
-        if (j.contains("seven_day") && j["seven_day"].is_object()) {
-            auto& sd = j["seven_day"];
-            resp.usage.sevenDayPct = safeDouble(sd.value("utilization", json()));
-            resp.usage.sevenDayResetsAt = safeString(sd.value("resets_at", json()));
-        }
-
-        resp.success = true;
-
-        if (!j.contains("five_hour") || !j.contains("seven_day")) {
-            resp.error = "Partial data: some usage fields missing (unsupported plan?)";
-        }
-    } catch (const json::exception& e) {
-        resp.error = std::string("Usage response parse error: ") + e.what();
-    }
-
-    return resp;
+    return ParseUsageResponse(http.body);
 }
 
 ApiResponse FetchUsageWithAutoRefresh()

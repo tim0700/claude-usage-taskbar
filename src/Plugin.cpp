@@ -25,7 +25,8 @@ int UsageItem::GetItemWidth() const { return Settings::Instance().Get().itemWidt
 void UsageItem::DrawItem(void* hDC, int x, int y, int w, int h, bool dark_mode)
 {
     RenderUsageItem(static_cast<HDC>(hDC), x, y, w, h,
-        dark_mode, m_label, m_pct, m_hasData, m_refreshing);
+        dark_mode, m_label, m_pct, m_hasData, m_refreshing,
+        m_hasSecond, m_pct2);
 }
 
 int UsageItem::OnMouseEvent(MouseEventType type, int x, int y, void* hWnd, int flag)
@@ -37,11 +38,14 @@ int UsageItem::OnMouseEvent(MouseEventType type, int x, int y, void* hWnd, int f
     return 0;
 }
 
-void UsageItem::UpdateData(double pct, bool has_data, bool refreshing)
+void UsageItem::UpdateData(double pct, bool has_data, bool refreshing,
+    bool has_second, double pct2)
 {
     m_pct = pct;
     m_hasData = has_data;
     m_refreshing = refreshing;
+    m_hasSecond = has_second;
+    m_pct2 = pct2;
 }
 
 // --- ClaudeUsagePlugin ---
@@ -83,7 +87,8 @@ void ClaudeUsagePlugin::DataRequired()
         m_refreshing = false;
 
     m_five_hour.UpdateData(snap.five_hour_pct, has_data, m_refreshing);
-    m_seven_day.UpdateData(snap.seven_day_pct, has_data, m_refreshing);
+    m_seven_day.UpdateData(snap.seven_day_pct, has_data, m_refreshing,
+        snap.has_scoped, snap.scoped_pct);
 
     if (has_data) {
         m_notifiedNoCredentials = false;
@@ -109,22 +114,38 @@ void ClaudeUsagePlugin::DataRequired()
             snap.five_hour_pct, snap.five_hour_resets.c_str(),
             snap.seven_day_pct, snap.seven_day_resets.c_str());
         m_tooltip = buf;
+        if (snap.has_scoped) {
+            wchar_t scopedBuf[160];
+            swprintf_s(scopedBuf, L"\nWeekly (%s): %.0f%% \u2014 %s",
+                snap.scoped_label.c_str(), snap.scoped_pct, snap.scoped_resets.c_str());
+            m_tooltip += scopedBuf;
+        }
     } else {
         m_tooltip = L"Claude Usage: waiting for data...";
     }
 
     if (snap.has_error) {
-        auto elapsed = (GetTickCount64() - snap.last_success_tick) / 1000;
-        wchar_t errBuf[128];
+        ULONGLONG now = GetTickCount64();
+        wchar_t errBuf[160];
+        // Live countdown while a rate-limit backoff is active (rebuilt every
+        // DataRequired call, so the remaining time ticks down)
+        if (snap.backoff_until_tick > now) {
+            ULONGLONG remain = (snap.backoff_until_tick - now + 999) / 1000;
+            swprintf_s(errBuf, L"\n\u26A0 Rate limited \u2014 retry in %llum %02llus",
+                remain / 60, remain % 60);
+            m_tooltip += errBuf;
+        }
         if (snap.last_success_tick > 0) {
+            auto elapsed = (now - snap.last_success_tick) / 1000;
             if (elapsed < 60)
                 swprintf_s(errBuf, L"\n\u26A0 Last updated %llds ago", elapsed);
             else
                 swprintf_s(errBuf, L"\n\u26A0 Last updated %lldm ago", elapsed / 60);
-        } else {
+            m_tooltip += errBuf;
+        } else if (snap.backoff_until_tick <= now) {
             swprintf_s(errBuf, L"\n\u26A0 %s", snap.error_msg.c_str());
+            m_tooltip += errBuf;
         }
-        m_tooltip += errBuf;
     }
 }
 
@@ -136,7 +157,7 @@ const wchar_t* ClaudeUsagePlugin::GetInfo(PluginInfoIndex index)
     case TMI_DESCRIPTION: return L"Displays Claude AI 5-hour and 7-day usage";
     case TMI_AUTHOR:      return L"cubicj";
     case TMI_COPYRIGHT:   return L"Copyright (C) 2026 cubicj";
-    case TMI_VERSION:     return L"1.0.2";
+    case TMI_VERSION:     return L"1.1.0";
     case TMI_URL:         return L"https://github.com/cubicj/claude-usage-taskbar";
     default:              return L"";
     }
