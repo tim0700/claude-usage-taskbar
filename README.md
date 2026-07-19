@@ -1,11 +1,15 @@
 # claude-usage-taskbar
 
-> [!IMPORTANT]
-> This project is archived and no longer maintained. Claude now provides official usage visibility in [Settings > Usage](https://claude.ai/settings/usage), including five-hour session and weekly usage progress for supported plans.
->
-> Version 1.0.2 is the final public release. The unofficial usage API used by this plugin is blocked or unreliable for OAuth credentials, so new installs are not recommended.
-
 A [TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor) plugin that displays your Claude AI usage (5-hour session and 7-day weekly) directly in the Windows taskbar.
+
+> [!NOTE]
+> This is a maintained fork of [cubicj/claude-usage-taskbar](https://github.com/cubicj/claude-usage-taskbar) (archived July 2026). It relies on an unofficial usage endpoint that may change or rate-limit without notice — this fork mitigates that with `Retry-After`-aware backoff. Claude also shows usage officially in [Settings > Usage](https://claude.ai/settings/usage); this plugin simply puts it on the taskbar.
+
+## What's new in this fork (v1.1.0)
+
+- **Model-scoped weekly limit (e.g. Fable)**: the 7d item renders as two stacked bars — blue for the all-models weekly limit, purple for the model-scoped one — with the value text showing the higher (binding) percentage. Parsed from the newer `limits` array in the usage API, so future scoped limits are picked up automatically.
+- **Smarter rate-limit handling**: honors the server's `Retry-After` on HTTP 429, shows a live countdown in the tooltip, and a manual click no longer extends the backoff window.
+- **Thicker bars** and hardened parsing of server-supplied values.
 
 | Taskbar | Hover |
 |:---:|:---:|
@@ -19,7 +23,7 @@ A [TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor) plugin that d
 
 ## Installation
 
-1. Download the latest release zip for your architecture from [Releases](https://github.com/cubicj/claude-usage-taskbar/releases)
+1. Download the latest release zip for your architecture from [Releases](https://github.com/tim0700/claude-usage-taskbar/releases)
 2. Extract `claude-usage-taskbar.dll` into TrafficMonitor's `plugins/` folder
    - To find this folder: **General Settings** → **Plug-in manage** → **Open plugin directory**
 3. Restart TrafficMonitor
@@ -44,6 +48,7 @@ Settings are stored in `claude-usage-taskbar.ini` next to the DLL.
 - Data refreshes automatically at the configured poll interval (default: 60s)
 - **Click** the plugin item to force an immediate refresh — the display shows `...` while fetching
 - Hover over the item for a tooltip with reset times and error details
+- When your plan has a model-scoped weekly limit (e.g. Fable), the 7d item shows two bars: blue = all models, purple = the scoped model; the number is the higher of the two, and the tooltip lists each limit separately
 
 ## Troubleshooting
 

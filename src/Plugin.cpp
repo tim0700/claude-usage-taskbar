@@ -156,10 +156,10 @@ const wchar_t* ClaudeUsagePlugin::GetInfo(PluginInfoIndex index)
     {
     case TMI_NAME:        return L"Claude Usage Monitor";
     case TMI_DESCRIPTION: return L"Displays Claude AI 5-hour and 7-day usage";
-    case TMI_AUTHOR:      return L"cubicj";
+    case TMI_AUTHOR:      return L"cubicj (fork: tim0700)";
     case TMI_COPYRIGHT:   return L"Copyright (C) 2026 cubicj";
     case TMI_VERSION:     return L"1.1.0";
-    case TMI_URL:         return L"https://github.com/cubicj/claude-usage-taskbar";
+    case TMI_URL:         return L"https://github.com/tim0700/claude-usage-taskbar";
     default:              return L"";
     }
 }
